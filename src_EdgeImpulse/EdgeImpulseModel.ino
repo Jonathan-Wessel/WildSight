@@ -24,7 +24,7 @@
 // https://github.com/espressif/arduino-esp32/releases/tag/2.0.4
 
 /* Includes ---------------------------------------------------------------- */
-#define EI_CLASSIFIER_OBJECT_DETECTION_THRESHOLD 0.5f
+#define EI_CLASSIFIER_OBJECT_DETECTION_THRESHOLD 0.01f
 
 #include <Wildsights_rhino_md_conf.5_inferencing.h>
 #include "edge-impulse-sdk/dsp/image/image.hpp"
@@ -35,6 +35,12 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+
+#include "sd_read_write.h"
+
+#include "img_converters.h"
+
+
 
 #define BOOT_BUTTON_PIN 0   // ESP32-S3 BOOT button is GPIO0 on most boards
 
@@ -141,7 +147,7 @@ static camera_config_t camera_config = {
     .ledc_timer = LEDC_TIMER_0,
     .ledc_channel = LEDC_CHANNEL_0,
 
-    .pixel_format = PIXFORMAT_RGB565, //YUV422,GRAYSCALE,RGB565,JPEG
+    .pixel_format = PIXFORMAT_GRAYSCALE, //YUV422,GRAYSCALE,RGB565,JPEG
     .frame_size = FRAMESIZE_QVGA,    //QQVGA-UXGA Do not use sizes above QVGA when not JPEG
 
     .jpeg_quality = 12, //0-63 lower number means higher quality
@@ -154,6 +160,69 @@ static camera_config_t camera_config = {
 bool ei_camera_init(void);
 void ei_camera_deinit(void);
 bool ei_camera_capture(uint32_t img_width, uint32_t img_height, uint8_t *out_buf) ;
+
+
+static void save_grayscale_as_jpeg_to_sd()
+{
+    camera_fb_t *fb = esp_camera_fb_get();
+    if (!fb) {
+        ei_printf("Capture failed (null fb)\r\n");
+        return;
+    }
+
+    // Expect grayscale framebuffer
+    ei_printf("fb format=%d w=%d h=%d len=%u\r\n",
+              (int)fb->format, fb->width, fb->height, (unsigned)fb->len);
+
+    if (fb->format != PIXFORMAT_GRAYSCALE) {
+        ei_printf("Expected GRAYSCALE, got format=%d (not saving)\r\n", (int)fb->format);
+        esp_camera_fb_return(fb);
+        return;
+    }
+
+    uint8_t *jpg_buf = nullptr;
+    size_t jpg_len = 0;
+
+    // Convert grayscale bytes -> JPEG
+    // quality: 10(best) .. 63(worst) in some ESP codepaths, but fmt2jpg uses 1..100 style in many builds.
+    // 80 is a good starting point.
+    bool ok = fmt2jpg(
+        fb->buf, fb->len,
+        fb->width, fb->height,
+        PIXFORMAT_GRAYSCALE,
+        80,
+        &jpg_buf, &jpg_len
+    );
+
+    esp_camera_fb_return(fb); // return fb ASAP once we’ve copied/converted
+
+    if (!ok || !jpg_buf || jpg_len < 2) {
+        ei_printf("fmt2jpg failed\r\n");
+        if (jpg_buf) free(jpg_buf);
+        return;
+    }
+
+    // Validate JPEG header (FF D8)
+    if (!(jpg_buf[0] == 0xFF && jpg_buf[1] == 0xD8)) {
+        ei_printf("JPEG header invalid: %02X %02X (not saving)\r\n", jpg_buf[0], jpg_buf[1]);
+        free(jpg_buf);
+        return;
+    }
+
+    int photo_index = readFileNum(SD_MMC, "/camera");
+    if (photo_index == -1) {
+        ei_printf("readFileNum failed\r\n");
+        free(jpg_buf);
+        return;
+    }
+
+    String path = "/camera/" + String(photo_index) + ".jpg";
+    writejpg(SD_MMC, path.c_str(), jpg_buf, jpg_len);
+    ei_printf("Saved %s (%u bytes)\r\n", path.c_str(), (unsigned)jpg_len);
+
+    free(jpg_buf);
+}
+
 
 /* Creation of a task to run image inference ----------------------------------- */
 void inferenceTask(void *param) {
@@ -169,7 +238,7 @@ void inferenceTask(void *param) {
         continue;
         }
 
-            // instead of wait_ms, we'll wait on the signal, this allows threads to cancel us...
+        // instead of wait_ms, we'll wait on the signal, this allows threads to cancel us...
         if (ei_sleep(5) != EI_IMPULSE_OK) {
             return;
         }
@@ -200,6 +269,7 @@ void inferenceTask(void *param) {
         }
         ei_printf("img stats: min=%u max=%u mean=%.1f\n", mn, mx, (float)sum / snapshot_buf_size);
 
+        save_grayscale_as_jpeg_to_sd();
 
         // Run the classifier
         ei_impulse_result_t result = { 0 };
@@ -314,6 +384,10 @@ void setup()
 
     // Trigger on press (falling edge)
     attachInterrupt(digitalPinToInterrupt(BOOT_BUTTON_PIN), onBootButtonISR, FALLING);
+
+    sdmmcInit();
+    createDir(SD_MMC, "/camera");
+    listDir(SD_MMC, "/camera", 0);
 
 
     ei_printf("Edge Impulse Inferencing Demo");
@@ -437,56 +511,89 @@ void ei_camera_deinit(void) {
  *
  */
 bool ei_camera_capture(uint32_t img_width, uint32_t img_height, uint8_t *out_buf) {
-    //bool do_resize = false;
-
     if (!is_initialised) {
         ei_printf("ERR: Camera is not initialized\r\n");
         return false;
     }
 
     camera_fb_t *fb = esp_camera_fb_get();
-
     if (!fb) {
-        ei_printf("Camera capture failed\n");
+        ei_printf("Camera capture failed\r\n");
         return false;
     }
-
-    uint16_t *p = (uint16_t*)fb->buf;
 
     const uint32_t pixels = img_width * img_height;
     const uint32_t bpp = EI_CLASSIFIER_RAW_SAMPLE_COUNT / pixels;   // 1 or 3
 
-    for (uint32_t y = 0; y < img_height; y++) {
-        uint32_t src_y = (uint32_t)((uint64_t)y * fb->height / img_height);
-        for (uint32_t x = 0; x < img_width; x++) {
-            uint32_t src_x = (uint32_t)((uint64_t)x * fb->width / img_width);
-            uint16_t px = p[src_y * fb->width + src_x];
+    // ---- GRAYSCALE framebuffer path ----
+    if (fb->format == PIXFORMAT_GRAYSCALE) {
+        uint8_t *p = fb->buf;
 
-            uint8_t r = ((px >> 11) & 0x1F) << 3;
-            uint8_t g = ((px >> 5)  & 0x3F) << 2;
-            uint8_t b = ( px        & 0x1F) << 3;
+        for (uint32_t y = 0; y < img_height; y++) {
+            uint32_t src_y = (uint32_t)((uint64_t)y * fb->height / img_height);
+            for (uint32_t x = 0; x < img_width; x++) {
+                uint32_t src_x = (uint32_t)((uint64_t)x * fb->width / img_width);
+                uint8_t gray = p[src_y * fb->width + src_x];
 
-            if (bpp == 1) {
-                uint8_t luma = (uint8_t)((r * 30 + g * 59 + b * 11) / 100);
-                out_buf[y * img_width + x] = luma;
-            }
-            else if (bpp == 3) {
-                size_t dst = (y * img_width + x) * 3;
-                out_buf[dst + 0] = r;
-                out_buf[dst + 1] = g;
-                out_buf[dst + 2] = b;
-            }
-            else {
-                ei_printf("ERR: unsupported bpp=%u\n", bpp);
-                esp_camera_fb_return(fb);
-                return false;
+                if (bpp == 1) {
+                    out_buf[y * img_width + x] = gray;
+                } else if (bpp == 3) {
+                    size_t dst = (y * img_width + x) * 3;
+                    out_buf[dst + 0] = gray;
+                    out_buf[dst + 1] = gray;
+                    out_buf[dst + 2] = gray;
+                } else {
+                    ei_printf("ERR: unsupported bpp=%u\r\n", (unsigned)bpp);
+                    esp_camera_fb_return(fb);
+                    return false;
+                }
             }
         }
+
+        esp_camera_fb_return(fb);
+        return true;
     }
 
+    // ---- RGB565 framebuffer path (your original logic) ----
+    if (fb->format == PIXFORMAT_RGB565) {
+        uint16_t *p = (uint16_t*)fb->buf;
+
+        for (uint32_t y = 0; y < img_height; y++) {
+            uint32_t src_y = (uint32_t)((uint64_t)y * fb->height / img_height);
+            for (uint32_t x = 0; x < img_width; x++) {
+                uint32_t src_x = (uint32_t)((uint64_t)x * fb->width / img_width);
+                uint16_t px = p[src_y * fb->width + src_x];
+
+                uint8_t r = ((px >> 11) & 0x1F) << 3;
+                uint8_t g = ((px >> 5)  & 0x3F) << 2;
+                uint8_t b = ( px        & 0x1F) << 3;
+
+                if (bpp == 1) {
+                    uint8_t luma = (uint8_t)((r * 30 + g * 59 + b * 11) / 100);
+                    out_buf[y * img_width + x] = luma;
+                } else if (bpp == 3) {
+                    size_t dst = (y * img_width + x) * 3;
+                    out_buf[dst + 0] = r;
+                    out_buf[dst + 1] = g;
+                    out_buf[dst + 2] = b;
+                } else {
+                    ei_printf("ERR: unsupported bpp=%u\r\n", (unsigned)bpp);
+                    esp_camera_fb_return(fb);
+                    return false;
+                }
+            }
+        }
+
+        esp_camera_fb_return(fb);
+        return true;
+    }
+
+    // ---- Unsupported framebuffer format ----
+    ei_printf("ERR: fb format %d not supported\r\n", (int)fb->format);
     esp_camera_fb_return(fb);
-    return true;
+    return false;
 }
+
 
 static int ei_camera_get_data(size_t offset, size_t length, float *out_ptr)
 {
