@@ -451,7 +451,7 @@
     "pinned_symbol_libs": []
   },
   "meta": {
-    "filename": "Untitled.kicad_pro",
+    "filename": "tinyScrubCam_pcb-2026-03-09_204300.kicad_pro",
     "version": 3
   },
   "net_settings": {
@@ -609,11 +609,6 @@
     "subpart_first_id": 65,
     "subpart_id_separator": 0
   },
-  "sheets": [
-    [
-      "ec7184b9-a4dd-4420-81ce-81014d409a86",
-      "Root"
-    ]
-  ],
+  "sheets": [],
   "text_variables": {}
 }
