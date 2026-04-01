@@ -193,11 +193,11 @@ bool cameraInitGray() {
   }
 
   sensor_t *s = esp_camera_sensor_get();
-  if (s) {
-    s->set_vflip(s, 1);
-    s->set_brightness(s, 1);
-    s->set_saturation(s, 0);
-  }
+
+  //Can alter these values to potentially achieve better inference results
+  s->set_contrast(s, 1);
+  s->set_brightness(s, 1);
+  s->set_saturation(s, 1);
 
   cam_init_ok = true;
   return true;
