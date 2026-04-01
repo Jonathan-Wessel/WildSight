@@ -122,29 +122,29 @@ void onEvent(ev_t ev) {
 }
 
 // =================== Bounding box draw (GRAYSCALE) ===================
-static inline void putPixelGray(uint8_t* img, int w, int h, int x, int y, uint8_t v) {
-  if (x < 0 || y < 0 || x >= w || y >= h) return;
-  img[y * w + x] = v;
-}
+// static inline void putPixelGray(uint8_t* img, int w, int h, int x, int y, uint8_t v) {
+//   if (x < 0 || y < 0 || x >= w || y >= h) return;
+//   img[y * w + x] = v;
+// }
 
-static void drawRectGray(uint8_t* img, int w, int h, int x, int y, int rw, int rh, uint8_t v) {
-  if (rw <= 0 || rh <= 0) return;
+// static void drawRectGray(uint8_t* img, int w, int h, int x, int y, int rw, int rh, uint8_t v) {
+//   if (rw <= 0 || rh <= 0) return;
 
-  if (x < 0) { rw += x; x = 0; }
-  if (y < 0) { rh += y; y = 0; }
-  if (x + rw > w) rw = w - x;
-  if (y + rh > h) rh = h - y;
-  if (rw <= 0 || rh <= 0) return;
+//   if (x < 0) { rw += x; x = 0; }
+//   if (y < 0) { rh += y; y = 0; }
+//   if (x + rw > w) rw = w - x;
+//   if (y + rh > h) rh = h - y;
+//   if (rw <= 0 || rh <= 0) return;
 
-  for (int i = x; i < x + rw; i++) {
-    putPixelGray(img, w, h, i, y, v);
-    putPixelGray(img, w, h, i, y + rh - 1, v);
-  }
-  for (int j = y; j < y + rh; j++) {
-    putPixelGray(img, w, h, x, j, v);
-    putPixelGray(img, w, h, x + rw - 1, j, v);
-  }
-}
+//   for (int i = x; i < x + rw; i++) {
+//     putPixelGray(img, w, h, i, y, v);
+//     putPixelGray(img, w, h, i, y + rh - 1, v);
+//   }
+//   for (int j = y; j < y + rh; j++) {
+//     putPixelGray(img, w, h, x, j, v);
+//     putPixelGray(img, w, h, x + rw - 1, j, v);
+//   }
+// }
 
 // =================== Camera config (GRAYSCALE QVGA) ===================
 static bool cam_init_ok = false;
