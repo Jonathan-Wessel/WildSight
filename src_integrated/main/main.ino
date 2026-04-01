@@ -219,52 +219,53 @@ static int ei_camera_get_data(size_t offset, size_t length, float *out_ptr) {
 }
 
 
-bool captureForEI(uint32_t out_w, uint32_t out_h, uint8_t *out_buf) {
-  camera_fb_t *fb = esp_camera_fb_get();
-  if (!fb) {
-    Serial.println("Camera capture failed");
+bool captureForEI(uint32_t img_width, uint32_t img_height, uint8_t *out_buf) {
+  if(!cam_init_ok) {
+    Serial.println("ERR: Camera is not initialized");
     return false;
   }
 
-  if (fb->format != PIXFORMAT_GRAYSCALE) {
-    Serial.printf("Unexpected fb format=%d\n", (int)fb->format);
+  camera_fb_t *fb = esp_camera_fb_get();
+  if(!fb) {
+    Serial.println("Camera Capture failed");
+    return false;
+  }
+
+  const uint32_t pixels = img_width * img_height;
+  const uint32_t bpp = EI_CLASSIFIER_RAW_SAMPLE_COUNT / pixels;
+
+  //Grayscale framebuffer path
+  if (fb->format == PIXFORMAT_GRAYSCALE) {
+        uint8_t *p = fb->buf;
+
+        for (uint32_t y = 0; y < img_height; y++) {
+            uint32_t src_y = (uint32_t)((uint64_t)y * fb->height / img_height);
+            for (uint32_t x = 0; x < img_width; x++) {
+                uint32_t src_x = (uint32_t)((uint64_t)x * fb->width / img_width);
+                uint8_t gray = p[src_y * fb->width + src_x];
+
+                if (bpp == 1) {
+                    out_buf[y * img_width + x] = gray;
+                } else if (bpp == 3) {
+                    size_t dst = (y * img_width + x) * 3;
+                    out_buf[dst + 0] = gray;
+                    out_buf[dst + 1] = gray;
+                    out_buf[dst + 2] = gray;
+                } else {
+                    Serial.println("ERR: unsupported bpp=%u", (unsigned)bpp);
+                    esp_camera_fb_return(fb);
+                    return false;
+                }
+            }
+        }
+
+        esp_camera_fb_return(fb);
+        return true;
+    }
+    Serial.println("ERR: fb format %d not supported", (int)fb->format);
     esp_camera_fb_return(fb);
     return false;
-  }
 
-  // Calculate center crop dimensions to preserve the AI model's aspect ratio
-  float target_ratio = (float)out_w / (float)out_h;
-  float src_ratio = (float)fb->width / (float)fb->height;
-
-  int crop_w = fb->width;
-  int crop_h = fb->height;
-  int offset_x = 0;
-  int offset_y = 0;
-
-  if (src_ratio > target_ratio) {
-    // Source is wider than needed (e.g., 320x240 source, 96x96 target)
-    // We crop the left and right sides.
-    crop_w = (int)(fb->height * target_ratio);
-    offset_x = (fb->width - crop_w) / 2;
-  } else if (src_ratio < target_ratio) {
-    // Source is taller than needed. We crop the top and bottom.
-    crop_h = (int)(fb->width / target_ratio);
-    offset_y = (fb->height - crop_h) / 2;
-  }
-
-  // Downsample ONLY the cropped region into the Edge Impulse buffer
-  for (uint32_t y = 0; y < out_h; y++) {
-    uint32_t src_y = offset_y + (y * crop_h) / out_h;
-    for (uint32_t x = 0; x < out_w; x++) {
-      uint32_t src_x = offset_x + (x * crop_w) / out_w;
-      
-      // Grab the grayscale pixel and place it in the EI buffer
-      out_buf[y * out_w + x] = fb->buf[src_y * fb->width + src_x];
-    }
-  }
-
-  esp_camera_fb_return(fb);
-  return true;
 }
 
 // Save latest GRAYSCALE frame as JPEG, optionally drawing a bbox first
