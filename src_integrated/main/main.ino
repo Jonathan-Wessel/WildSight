@@ -183,6 +183,7 @@ static camera_config_t cam_cfg = {
 static uint8_t *snapshot_buf = nullptr;
 static size_t snapshot_buf_size = 0;
 
+//Camera Initialization Function
 bool cameraInitGray() {
   if (cam_init_ok) return true;
 
@@ -205,21 +206,14 @@ bool cameraInitGray() {
 
 // EI data feed
 static int ei_camera_get_data(size_t offset, size_t length, float *out_ptr) {
-  if (!snapshot_buf) return -1;
-  if (offset + length > snapshot_buf_size) {
-    Serial.printf("EI get_data OOB: off=%u len=%u size=%u\n",
-                  (unsigned)offset, (unsigned)length, (unsigned)snapshot_buf_size);
-    return -1;
-  }
-
   for (size_t i = 0; i < length; i++) {
-#if (EI_CLASSIFIER_TFLITE_INPUT_DATATYPE == EI_CLASSIFIER_DATATYPE_INT8)
-    out_ptr[i] = (float)((int)snapshot_buf[offset + i] - 128);
-#elif (EI_CLASSIFIER_TFLITE_INPUT_DATATYPE == EI_CLASSIFIER_DATATYPE_UINT8)
-    out_ptr[i] = (float)snapshot_buf[offset + i];
-#else
-    out_ptr[i] = (float)snapshot_buf[offset + i] / 255.0f;
-#endif
+    #if (EI_CLASSIFIER_TFLITE_INPUT_DATATYPE == EI_CLASSIFIER_DATATYPE_INT8)
+        out_ptr[i] = (float)((int)snapshot_buf[offset + i] - 128);
+    #elif (EI_CLASSIFIER_TFLITE_INPUT_DATATYPE == EI_CLASSIFIER_DATATYPE_UINT8)
+        out_ptr[i] = (float)snapshot_buf[offset + i];
+    #else
+        out_ptr[i] = (float)snapshot_buf[offset + i] / 255.0f;
+    #endif
   }
   return 0;
 }
