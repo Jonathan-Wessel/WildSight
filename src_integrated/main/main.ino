@@ -173,7 +173,7 @@ static camera_config_t cam_cfg = {
   .ledc_channel = LEDC_CHANNEL_0,
 
   .pixel_format = PIXFORMAT_GRAYSCALE,
-  .frame_size   = FRAMESIZE_QVGA,        // 320x240
+  .frame_size   = FRAMESIZE_VGA,        // 640x480
   .jpeg_quality = 12,
   .fb_count     = 1,
   .fb_location  = CAMERA_FB_IN_PSRAM,
