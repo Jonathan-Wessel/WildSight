@@ -502,8 +502,8 @@ void setup() {
   // LMIC_startJoining();
 
   // PIR semaphore + ISR
-  pir_sem = xSemaphoreCreateBinary();
-  attachInterrupt(digitalPinToInterrupt(GPIO_PIR), onPirISR, RISING);
+  // pir_sem = xSemaphoreCreateBinary();
+  // attachInterrupt(digitalPinToInterrupt(GPIO_PIR), onPirISR, RISING);
 
   // Inference task
   xTaskCreatePinnedToCore(inferenceTask, "inferenceTask", 32768, nullptr, 1, &inferTaskHandle, 1);
