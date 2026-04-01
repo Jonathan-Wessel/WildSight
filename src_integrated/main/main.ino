@@ -40,111 +40,111 @@
 #define LORA_SCK   45
 
 // =================== LoRaWAN KEYS ===================
-static const uint8_t JOIN_EUI_BE[8] = { 0,0,0,0,0,0,0,0 };
-static const uint8_t DEV_EUI_BE[8]  = { 0x70,0xB3,0xD5,0x7E,0xD8,0x00,0x50,0x7F };
-static const uint8_t APP_KEY[16]    = {
-  0x6E,0x2C,0xB9,0x5B,0x06,0x57,0x13,0x4B,
-  0x9B,0xCC,0xEC,0x15,0xB6,0x5C,0x51,0x74
-};
+// static const uint8_t JOIN_EUI_BE[8] = { 0,0,0,0,0,0,0,0 };
+// static const uint8_t DEV_EUI_BE[8]  = { 0x70,0xB3,0xD5,0x7E,0xD8,0x00,0x50,0x7F };
+// static const uint8_t APP_KEY[16]    = {
+//   0x6E,0x2C,0xB9,0x5B,0x06,0x57,0x13,0x4B,
+//   0x9B,0xCC,0xEC,0x15,0xB6,0x5C,0x51,0x74
+// };
 
-void os_getArtEui (u1_t* buf) { for (int i=0;i<8;i++) buf[i] = JOIN_EUI_BE[7-i]; }
-void os_getDevEui (u1_t* buf) { for (int i=0;i<8;i++) buf[i] = DEV_EUI_BE[7-i]; }
-void os_getDevKey (u1_t* buf) { memcpy(buf, APP_KEY, 16); }
+// void os_getArtEui (u1_t* buf) { for (int i=0;i<8;i++) buf[i] = JOIN_EUI_BE[7-i]; }
+// void os_getDevEui (u1_t* buf) { for (int i=0;i<8;i++) buf[i] = DEV_EUI_BE[7-i]; }
+// void os_getDevKey (u1_t* buf) { memcpy(buf, APP_KEY, 16); }
 
-// LMIC pin mapping
-const lmic_pinmap lmic_pins = {
-  .nss = PIN_NSS,
-  .rxtx = LMIC_UNUSED_PIN,
-  .rst = PIN_RST,
-  .dio = { PIN_DIO0, PIN_DIO1, LMIC_UNUSED_PIN }
-};
+// // LMIC pin mapping
+// const lmic_pinmap lmic_pins = {
+//   .nss = PIN_NSS,
+//   .rxtx = LMIC_UNUSED_PIN,
+//   .rst = PIN_RST,
+//   .dio = { PIN_DIO0, PIN_DIO1, LMIC_UNUSED_PIN }
+// };
 
-static osjob_t sendjob;
+// static osjob_t sendjob;
 
 // =================== LoRa payload queue ===================
-static char pendingMsg[51];
-static volatile bool havePendingMsg = false;
+// static char pendingMsg[51];
+// static volatile bool havePendingMsg = false;
 
-void do_send(osjob_t*);
+// void do_send(osjob_t*);
 
-bool sendString(const char* s) {
-  if (!s) return false;
-  size_t len = strnlen(s, sizeof(pendingMsg)-1);
-  if (len == 0) return false;
+// bool sendString(const char* s) {
+//   if (!s) return false;
+//   size_t len = strnlen(s, sizeof(pendingMsg)-1);
+//   if (len == 0) return false;
 
-  memset(pendingMsg, 0, sizeof(pendingMsg));
-  memcpy(pendingMsg, s, len);
-  havePendingMsg = true;
+//   memset(pendingMsg, 0, sizeof(pendingMsg));
+//   memcpy(pendingMsg, s, len);
+//   havePendingMsg = true;
 
-  do_send(&sendjob);
-  return true;
-}
+//   do_send(&sendjob);
+//   return true;
+// }
 
-void queueSendRhinoDetected() {
-  sendString("Rhino detected");
-}
+// void queueSendRhinoDetected() {
+//   sendString("Rhino detected");
+// }
 
-void do_send(osjob_t*) {
-  if (LMIC.devaddr == 0) return;          // not joined yet
-  if (LMIC.opmode & OP_TXRXPEND) {        // radio busy
-    os_setTimedCallback(&sendjob, os_getTime() + ms2osticks(300), do_send);
-    return;
-  }
-  if (!havePendingMsg) return;
+// void do_send(osjob_t*) {
+//   if (LMIC.devaddr == 0) return;          // not joined yet
+//   if (LMIC.opmode & OP_TXRXPEND) {        // radio busy
+//     os_setTimedCallback(&sendjob, os_getTime() + ms2osticks(300), do_send);
+//     return;
+//   }
+//   if (!havePendingMsg) return;
 
-  uint8_t buf[51];
-  size_t len = strnlen(pendingMsg, sizeof(pendingMsg));
-  memcpy(buf, pendingMsg, len);
+//   uint8_t buf[51];
+//   size_t len = strnlen(pendingMsg, sizeof(pendingMsg));
+//   memcpy(buf, pendingMsg, len);
 
-  LMIC_setTxData2(1, buf, (u1_t)len, 0);
-  Serial.print("Uplink queued: ");
-  Serial.println(pendingMsg);
+//   LMIC_setTxData2(1, buf, (u1_t)len, 0);
+//   Serial.print("Uplink queued: ");
+//   Serial.println(pendingMsg);
 
-  havePendingMsg = false;
-}
+//   havePendingMsg = false;
+// }
 
-void onEvent(ev_t ev) {
-  Serial.print("[LMIC] ");
-  Serial.println((unsigned)ev);
+// void onEvent(ev_t ev) {
+//   Serial.print("[LMIC] ");
+//   Serial.println((unsigned)ev);
 
-  if (ev == EV_JOINING) Serial.println("Joining...");
-  if (ev == EV_JOINED) {
-    Serial.println("JOINED!");
-    LMIC_setLinkCheckMode(0);
-    do_send(&sendjob);
-  }
-  if (ev == EV_JOIN_FAILED) {
-    Serial.println("Join failed (keys/subband/pins/frequency-plan issue)");
-  }
-  if (ev == EV_TXCOMPLETE) {
-    Serial.println("TX complete");
-  }
-}
+//   if (ev == EV_JOINING) Serial.println("Joining...");
+//   if (ev == EV_JOINED) {
+//     Serial.println("JOINED!");
+//     LMIC_setLinkCheckMode(0);
+//     do_send(&sendjob);
+//   }
+//   if (ev == EV_JOIN_FAILED) {
+//     Serial.println("Join failed (keys/subband/pins/frequency-plan issue)");
+//   }
+//   if (ev == EV_TXCOMPLETE) {
+//     Serial.println("TX complete");
+//   }
+// }
 
 // =================== Bounding box draw (GRAYSCALE) ===================
-// static inline void putPixelGray(uint8_t* img, int w, int h, int x, int y, uint8_t v) {
-//   if (x < 0 || y < 0 || x >= w || y >= h) return;
-//   img[y * w + x] = v;
-// }
+static inline void putPixelGray(uint8_t* img, int w, int h, int x, int y, uint8_t v) {
+  if (x < 0 || y < 0 || x >= w || y >= h) return;
+  img[y * w + x] = v;
+}
 
-// static void drawRectGray(uint8_t* img, int w, int h, int x, int y, int rw, int rh, uint8_t v) {
-//   if (rw <= 0 || rh <= 0) return;
+static void drawRectGray(uint8_t* img, int w, int h, int x, int y, int rw, int rh, uint8_t v) {
+  if (rw <= 0 || rh <= 0) return;
 
-//   if (x < 0) { rw += x; x = 0; }
-//   if (y < 0) { rh += y; y = 0; }
-//   if (x + rw > w) rw = w - x;
-//   if (y + rh > h) rh = h - y;
-//   if (rw <= 0 || rh <= 0) return;
+  if (x < 0) { rw += x; x = 0; }
+  if (y < 0) { rh += y; y = 0; }
+  if (x + rw > w) rw = w - x;
+  if (y + rh > h) rh = h - y;
+  if (rw <= 0 || rh <= 0) return;
 
-//   for (int i = x; i < x + rw; i++) {
-//     putPixelGray(img, w, h, i, y, v);
-//     putPixelGray(img, w, h, i, y + rh - 1, v);
-//   }
-//   for (int j = y; j < y + rh; j++) {
-//     putPixelGray(img, w, h, x, j, v);
-//     putPixelGray(img, w, h, x + rw - 1, j, v);
-//   }
-// }
+  for (int i = x; i < x + rw; i++) {
+    putPixelGray(img, w, h, i, y, v);
+    putPixelGray(img, w, h, i, y + rh - 1, v);
+  }
+  for (int j = y; j < y + rh; j++) {
+    putPixelGray(img, w, h, x, j, v);
+    putPixelGray(img, w, h, x + rw - 1, j, v);
+  }
+}
 
 // =================== Camera config (GRAYSCALE QVGA) ===================
 static bool cam_init_ok = false;
@@ -343,14 +343,14 @@ static bool getBestRhinoBox(const ei_impulse_result_t &result, ei_impulse_result
 }
 
 // =================== PIR semaphore + task ===================
-SemaphoreHandle_t pir_sem = nullptr;
+//SemaphoreHandle_t pir_sem = nullptr;
 TaskHandle_t inferTaskHandle = nullptr;
 
-void IRAM_ATTR onPirISR() {
-  BaseType_t hp = pdFALSE;
-  if (pir_sem) xSemaphoreGiveFromISR(pir_sem, &hp);
-  if (hp) portYIELD_FROM_ISR();
-}
+// void IRAM_ATTR onPirISR() {
+//   BaseType_t hp = pdFALSE;
+//   if (pir_sem) xSemaphoreGiveFromISR(pir_sem, &hp);
+//   if (hp) portYIELD_FROM_ISR();
+// }
 
 void inferenceTask(void *param) {
   (void)param;
@@ -410,8 +410,8 @@ void inferenceTask(void *param) {
       int sh = (best.height * FB_H) / IN_H;
       */
       // Scale bbox from model input -> cropped region -> 320x240 framebuffer
-      const int FB_W = 320;
-      const int FB_H = 240;
+      const int FB_W = 640;
+      const int FB_H = 480;
       const int IN_W = EI_CLASSIFIER_INPUT_WIDTH;
       const int IN_H = EI_CLASSIFIER_INPUT_HEIGHT;
 
@@ -443,12 +443,12 @@ void inferenceTask(void *param) {
       }
 
       // Send LoRa
-      queueSendRhinoDetected();
+      //queueSendRhinoDetected();
     }
     else {
       Serial.println("No rhino.");
       //ws2812SetColor(1);
-      sendString("No Rhino");
+      //sendString("No Rhino");
       // Optional: save non-detections too
       saveGrayJpegWithBox(0,0,0,0,false);
     }
@@ -466,9 +466,9 @@ void setup() {
   Serial.printf("Free heap: %u\n", ESP.getFreeHeap());
   Serial.printf("Free PSRAM: %u\n", ESP.getFreePsram());
 
-  pinMode(GPIO_PIR, INPUT);
-  pinMode(GPIO_IRLED, OUTPUT);
-  pinMode(GPIO_LIGHTSENSOR, INPUT);
+  // pinMode(GPIO_PIR, INPUT);
+  // pinMode(GPIO_IRLED, OUTPUT);
+  // pinMode(GPIO_LIGHTSENSOR, INPUT);
 
   //ws2812Init();
 
@@ -493,13 +493,13 @@ void setup() {
   run_classifier_init();
 
   // LoRa
-  SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, PIN_NSS);
-  os_init();
-  LMIC_reset();
-  LMIC_selectSubBand(1);
-  LMIC_setAdrMode(0);
-  LMIC_setClockError(MAX_CLOCK_ERROR * 1 / 100);
-  LMIC_startJoining();
+  // SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, PIN_NSS);
+  // os_init();
+  // LMIC_reset();
+  // LMIC_selectSubBand(1);
+  // LMIC_setAdrMode(0);
+  // LMIC_setClockError(MAX_CLOCK_ERROR * 1 / 100);
+  // LMIC_startJoining();
 
   // PIR semaphore + ISR
   pir_sem = xSemaphoreCreateBinary();
