@@ -8,14 +8,14 @@
 
 // =================== Arduino / LMIC / SPI ===================
 #include <Arduino.h>
-#include <lmic.h>
-#include <hal/hal.h>
+//#include <lmic.h>
+//#include <hal/hal.h>
 #include <SPI.h>
 #include <string.h>
 
 // =================== Edge Impulse ===================
-#define EI_CLASSIFIER_OBJECT_DETECTION_THRESHOLD 0.01f
-#include <Wildsights_rhino_md_conf.5_inferencing.h>
+#define EI_CLASSIFIER_OBJECT_DETECTION_THRESHOLD 0.7f
+#include <rhino_md_conf.5_second_class_inferencing.h>
 #include "edge-impulse-sdk/dsp/image/image.hpp"
 #include "esp_heap_caps.h"
 
@@ -196,8 +196,8 @@ bool cameraInitGray() {
   sensor_t *s = esp_camera_sensor_get();
 
   //Can alter these values to potentially achieve better inference results
-  s->set_contrast(s, 1);
-  s->set_brightness(s, 1);
+  //s->set_contrast(s, 1);
+  s->set_brightness(s, -1);
   s->set_saturation(s, 1);
 
   cam_init_ok = true;
@@ -221,13 +221,13 @@ static int ei_camera_get_data(size_t offset, size_t length, float *out_ptr) {
 
 bool captureForEI(uint32_t img_width, uint32_t img_height, uint8_t *out_buf) {
   if(!cam_init_ok) {
-    Serial.println("ERR: Camera is not initialized");
+    Serial.printf("ERR: Camera is not initialized\n");
     return false;
   }
 
   camera_fb_t *fb = esp_camera_fb_get();
   if(!fb) {
-    Serial.println("Camera Capture failed");
+    Serial.printf("Camera Capture failed\n");
     return false;
   }
 
@@ -252,7 +252,7 @@ bool captureForEI(uint32_t img_width, uint32_t img_height, uint8_t *out_buf) {
                     out_buf[dst + 1] = gray;
                     out_buf[dst + 2] = gray;
                 } else {
-                    Serial.println("ERR: unsupported bpp=%u", (unsigned)bpp);
+                    Serial.printf("ERR: unsupported bpp=%u\n", (unsigned)bpp);
                     esp_camera_fb_return(fb);
                     return false;
                 }
@@ -262,7 +262,7 @@ bool captureForEI(uint32_t img_width, uint32_t img_height, uint8_t *out_buf) {
         esp_camera_fb_return(fb);
         return true;
     }
-    Serial.println("ERR: fb format %d not supported", (int)fb->format);
+    Serial.printf("ERR: fb format %d not supported\n", (int)fb->format);
     esp_camera_fb_return(fb);
     return false;
 
@@ -322,13 +322,13 @@ static bool getBestRhinoBox(const ei_impulse_result_t &result, ei_impulse_result
   bool found = false;
   for (size_t i = 0; i < EI_CLASSIFIER_OBJECT_DETECTION_COUNT; i++) {
     auto bb = result.bounding_boxes[i];
-    if (!bb.label) continue;
+    if (bb.label == nullptr || strcmp(bb.label, "not rhino") == 0) continue;
     
-    // Ignore anything below your threshold (currently 0.01f)
+    // Ignore anything below your threshold (currently 0.7f)
     if (bb.value < EI_CLASSIFIER_OBJECT_DETECTION_THRESHOLD) continue;
 
     // Relaxed match: Check if "rhino" or "Rhino" is anywhere in the label
-    if (strstr(bb.label, "rhino") != nullptr || strstr(bb.label, "Rhino") != nullptr) {
+    if (strcmp(bb.label, "rhino") == 0) {
       if (!found || bb.value > best.value) {
         best = bb;
         found = true;
@@ -357,18 +357,24 @@ void inferenceTask(void *param) {
   Serial.printf("inferenceTask running on core %d\n", xPortGetCoreID());
 
   while (true) {
-    xSemaphoreTake(pir_sem, portMAX_DELAY);
+    // xSemaphoreTake(pir_sem, portMAX_DELAY);
 
-    // Debounce
-    vTaskDelay(pdMS_TO_TICKS(50));
-    if (digitalRead(GPIO_PIR) != HIGH) continue;
+    // // Debounce
+    // vTaskDelay(pdMS_TO_TICKS(50));
+    // if (digitalRead(GPIO_PIR) != HIGH) continue;
 
     //ws2812SetColor(3);
 
+    for (int i = 0; i < 2; i++) {
+      camera_fb_t *tmp = esp_camera_fb_get();
+      if (tmp) esp_camera_fb_return(tmp);
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
     // ---- EI capture + classify ----
-    Serial.println("INFERENCE: starting capture");
+    Serial.printf("INFERENCE: starting capture\n");
     if (!captureForEI(EI_CLASSIFIER_INPUT_WIDTH, EI_CLASSIFIER_INPUT_HEIGHT, snapshot_buf)) {
-      Serial.println("INFERENCE: capture failed");
+      Serial.printf("INFERENCE: capture failed\n");
       //ws2812SetColor(1);
       continue;
     }
@@ -377,10 +383,10 @@ void inferenceTask(void *param) {
     signal.total_length = EI_CLASSIFIER_RAW_SAMPLE_COUNT;
     signal.get_data = &ei_camera_get_data;
 
-    Serial.println("INFERENCE: running classifier");
+    Serial.printf("INFERENCE: running classifier\n");
     ei_impulse_result_t result = {0};
     EI_IMPULSE_ERROR err = run_classifier(&signal, &result, false);
-    Serial.println("INFERENCE: done classifier");
+    Serial.printf("INFERENCE: done classifier\n");
    
     if (err != EI_IMPULSE_OK) {
       Serial.printf("run_classifier failed (%d)\n", err);
@@ -512,5 +518,6 @@ void setup() {
 }
 
 void loop() {
-  os_runloop_once();
+  vTaskDelay(pdMS_TO_TICKS(1000));
+  //os_runloop_once();
 }
