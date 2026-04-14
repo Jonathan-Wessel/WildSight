@@ -180,14 +180,26 @@ void testFileIO(fs::FS &fs, const char * path){
     file.close();
 }
 
-void writejpg(fs::FS &fs, const char * path, const uint8_t *buf, size_t size){
+bool writejpg(fs::FS &fs, const char *path, const uint8_t *data, size_t len) {
+    Serial.printf("Writing file: %s (%u bytes)\n", path, (unsigned)len);
+
     File file = fs.open(path, FILE_WRITE);
-    if(!file){
-      Serial.println("Failed to open file for writing");
-      return;
+    if (!file) {
+        Serial.println("Failed to open file for writing");
+        return false;
     }
-    file.write(buf, size);
-    Serial.printf("Saved file to path: %s\r\n", path);
+
+    size_t written = file.write(data, len);
+    file.close();
+
+    Serial.printf("Requested=%u Written=%u\n", (unsigned)len, (unsigned)written);
+
+    if (written != len) {
+        Serial.println("Write failed or incomplete");
+        return false;
+    }
+
+    return true;
 }
 
 int readFileNum(fs::FS &fs, const char * dirname){
