@@ -8,18 +8,20 @@
 
 // =================== Arduino / LMIC / SPI ===================
 #include <Arduino.h>
-//#include <lmic.h>
-//#include <hal/hal.h>
+#include <lmic.h>
+#include <hal/hal.h>
 #include <SPI.h>
 #include <string.h>
 
 // =================== Edge Impulse ===================
-#define EI_CLASSIFIER_OBJECT_DETECTION_THRESHOLD 0.5f
-#include <rhino_md_conf.5_second_class_inferencing.h>
+//#define EI_CLASSIFIER_OBJECT_DETECTION_THRESHOLD 0.5f
+//#include <rhino_md_conf.5_second_class_inferencing.h>
+#include <Wildsights_rhino_md_conf.5_inferencing.h>
+//#include <Dog-Detector_inferencing.h>
 #include "edge-impulse-sdk/dsp/image/image.hpp"
 #include "esp_heap_caps.h"
 
-// =================== FreeRTOS ===================
+// =================== FreeRTOS ===================draw
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -40,109 +42,84 @@
 #define LORA_SCK   45
 
 // =================== LoRaWAN KEYS ===================
-// static const uint8_t JOIN_EUI_BE[8] = { 0,0,0,0,0,0,0,0 };
-// static const uint8_t DEV_EUI_BE[8]  = { 0x70,0xB3,0xD5,0x7E,0xD8,0x00,0x50,0x7F };
-// static const uint8_t APP_KEY[16]    = {
-//   0x6E,0x2C,0xB9,0x5B,0x06,0x57,0x13,0x4B,
-//   0x9B,0xCC,0xEC,0x15,0xB6,0x5C,0x51,0x74
-// };
+static const uint8_t JOIN_EUI_BE[8] = { 0,0,0,0,0,0,0,0 };
+static const uint8_t DEV_EUI_BE[8]  = { 0x70,0xB3,0xD5,0x7E,0xD8,0x00,0x50,0x7F };
+static const uint8_t APP_KEY[16]    = {
+  0x6E,0x2C,0xB9,0x5B,0x06,0x57,0x13,0x4B,
+  0x9B,0xCC,0xEC,0x15,0xB6,0x5C,0x51,0x74
+};
 
-// void os_getArtEui (u1_t* buf) { for (int i=0;i<8;i++) buf[i] = JOIN_EUI_BE[7-i]; }
-// void os_getDevEui (u1_t* buf) { for (int i=0;i<8;i++) buf[i] = DEV_EUI_BE[7-i]; }
-// void os_getDevKey (u1_t* buf) { memcpy(buf, APP_KEY, 16); }
+void os_getArtEui (u1_t* buf) { for (int i=0;i<8;i++) buf[i] = JOIN_EUI_BE[7-i]; }
+void os_getDevEui (u1_t* buf) { for (int i=0;i<8;i++) buf[i] = DEV_EUI_BE[7-i]; }
+void os_getDevKey (u1_t* buf) { memcpy(buf, APP_KEY, 16); }
 
-// // LMIC pin mapping
-// const lmic_pinmap lmic_pins = {
-//   .nss = PIN_NSS,
-//   .rxtx = LMIC_UNUSED_PIN,
-//   .rst = PIN_RST,
-//   .dio = { PIN_DIO0, PIN_DIO1, LMIC_UNUSED_PIN }
-// };
+// LMIC pin mapping
+const lmic_pinmap lmic_pins = {
+  .nss = PIN_NSS,
+  .rxtx = LMIC_UNUSED_PIN,
+  .rst = PIN_RST,
+  .dio = { PIN_DIO0, PIN_DIO1, LMIC_UNUSED_PIN }
+};
 
-// static osjob_t sendjob;
+static osjob_t sendjob;
 
 // =================== LoRa payload queue ===================
-// static char pendingMsg[51];
-// static volatile bool havePendingMsg = false;
+static char pendingMsg[51];
+static volatile bool havePendingMsg = false;
 
-// void do_send(osjob_t*);
+void do_send(osjob_t*);
 
-// bool sendString(const char* s) {
-//   if (!s) return false;
-//   size_t len = strnlen(s, sizeof(pendingMsg)-1);
-//   if (len == 0) return false;
+bool sendString(const char* s) {
+  if (!s) return false;
+  size_t len = strnlen(s, sizeof(pendingMsg)-1);
+  if (len == 0) return false;
 
-//   memset(pendingMsg, 0, sizeof(pendingMsg));
-//   memcpy(pendingMsg, s, len);
-//   havePendingMsg = true;
+  memset(pendingMsg, 0, sizeof(pendingMsg));
+  memcpy(pendingMsg, s, len);
+  havePendingMsg = true;
 
-//   do_send(&sendjob);
-//   return true;
-// }
-
-// void queueSendRhinoDetected() {
-//   sendString("Rhino detected");
-// }
-
-// void do_send(osjob_t*) {
-//   if (LMIC.devaddr == 0) return;          // not joined yet
-//   if (LMIC.opmode & OP_TXRXPEND) {        // radio busy
-//     os_setTimedCallback(&sendjob, os_getTime() + ms2osticks(300), do_send);
-//     return;
-//   }
-//   if (!havePendingMsg) return;
-
-//   uint8_t buf[51];
-//   size_t len = strnlen(pendingMsg, sizeof(pendingMsg));
-//   memcpy(buf, pendingMsg, len);
-
-//   LMIC_setTxData2(1, buf, (u1_t)len, 0);
-//   Serial.print("Uplink queued: ");
-//   Serial.println(pendingMsg);
-
-//   havePendingMsg = false;
-// }
-
-// void onEvent(ev_t ev) {
-//   Serial.print("[LMIC] ");
-//   Serial.println((unsigned)ev);
-
-//   if (ev == EV_JOINING) Serial.println("Joining...");
-//   if (ev == EV_JOINED) {
-//     Serial.println("JOINED!");
-//     LMIC_setLinkCheckMode(0);
-//     do_send(&sendjob);
-//   }
-//   if (ev == EV_JOIN_FAILED) {
-//     Serial.println("Join failed (keys/subband/pins/frequency-plan issue)");
-//   }
-//   if (ev == EV_TXCOMPLETE) {
-//     Serial.println("TX complete");
-//   }
-// }
-
-// =================== Bounding box draw (GRAYSCALE) ===================
-static inline void putPixelGray(uint8_t* img, int w, int h, int x, int y, uint8_t v) {
-  if (x < 0 || y < 0 || x >= w || y >= h) return;
-  img[y * w + x] = v;
+  do_send(&sendjob);
+  return true;
 }
 
-static void drawRectGray(uint8_t* img, int w, int h, int x, int y, int rw, int rh, uint8_t v) {
-  if (rw <= 0 || rh <= 0) return;
+void queueSendRhinoDetected() {
+  sendString("Rhino detected");
+}
 
-  if (x < 0) { rw += x; x = 0; }
-  if (y < 0) { rh += y; y = 0; }
-  if (x + rw > w) rw = w - x;
-  if (y + rh > h) rh = h - y;
-  if (rw <= 0 || rh <= 0) return;
-
-  for (int i = x; i < x + rw; i++) {
-    putPixelGray(img, w, h, i, y, v);
-    putPixelGray(img, w, h, i, y + rh - 1, v);
+void do_send(osjob_t*) {
+  if (LMIC.devaddr == 0) return;          // not joined yet
+  if (LMIC.opmode & OP_TXRXPEND) {        // radio busy
+    os_setTimedCallback(&sendjob, os_getTime() + ms2osticks(300), do_send);
+    return;
   }
-  for (int j = y; j < y + rh; j++) {
-    putPixelGray(img, w, h, x, j, v);
-    putPixelGray(img, w, h, x + rw - 1, j, v);
+  if (!havePendingMsg) return;
+
+  uint8_t buf[51];
+  size_t len = strnlen(pendingMsg, sizeof(pendingMsg));
+  memcpy(buf, pendingMsg, len);
+
+  LMIC_setTxData2(1, buf, (u1_t)len, 0);
+  Serial.print("Uplink queued: ");
+  Serial.println(pendingMsg);
+
+  havePendingMsg = false;
+}
+
+void onEvent(ev_t ev) {
+  Serial.print("[LMIC] ");
+  Serial.println((unsigned)ev);
+
+  if (ev == EV_JOINING) Serial.println("Joining...");
+  if (ev == EV_JOINED) {
+    Serial.println("JOINED!");
+    LMIC_setLinkCheckMode(0);
+    do_send(&sendjob);
+  }
+  if (ev == EV_JOIN_FAILED) {
+    Serial.println("Join failed (keys/subband/pins/frequency-plan issue)");
+  }
+  if (ev == EV_TXCOMPLETE) {
+    Serial.println("TX complete");
   }
 }
 
@@ -194,11 +171,13 @@ bool cameraInitGray() {
   }
 
   sensor_t *s = esp_camera_sensor_get();
+  Serial.printf("Camera PID: 0x%02x\n", s->id.PID);
 
-  //Can alter these values to potentially achieve better inference results
-  s->set_contrast(s, 1);
-  //s->set_brightness(s, 1);
-  //s->set_saturation(s, 1);
+      if (s->id.PID == OV3660_PID) {
+      s->set_vflip(s, 1); // flip it back
+      s->set_brightness(s, 1); // up the brightness just a bit
+      s->set_saturation(s, 0); // lower the saturation
+    }
 
   cam_init_ok = true;
   return true;
@@ -206,20 +185,21 @@ bool cameraInitGray() {
 
 // EI data feed
 static int ei_camera_get_data(size_t offset, size_t length, float *out_ptr) {
-  for (size_t i = 0; i < length; i++) {
-    #if (EI_CLASSIFIER_TFLITE_INPUT_DATATYPE == EI_CLASSIFIER_DATATYPE_INT8)
-        out_ptr[i] = (float)((int)snapshot_buf[offset + i] - 128);
-    #elif (EI_CLASSIFIER_TFLITE_INPUT_DATATYPE == EI_CLASSIFIER_DATATYPE_UINT8)
-        out_ptr[i] = (float)snapshot_buf[offset + i];
-    #else
-        out_ptr[i] = (float)snapshot_buf[offset + i] / 255.0f;
-    #endif
-  }
-  return 0;
+    size_t pixel_ix = offset;
+    size_t pixels_left = length;
+
+    while (pixels_left != 0) {
+        out_ptr[0] = (float)snapshot_buf[pixel_ix];
+        out_ptr++;
+        pixel_ix++;
+        pixels_left--;
+    }
+
+    return 0;
 }
 
 // Save latest GRAYSCALE frame as JPEG, optionally drawing a bbox first
-bool saveGrayJpegWithBox(camera_fb_t *fb, int x, int y, int w, int h, bool drawBox) {
+bool saveGrayJpegWithBox(camera_fb_t *fb) {
   if (!fb) {
     Serial.println("saveGrayJpegWithBox: fb is null");
     return false;
@@ -228,10 +208,6 @@ bool saveGrayJpegWithBox(camera_fb_t *fb, int x, int y, int w, int h, bool drawB
   if (fb->format != PIXFORMAT_GRAYSCALE) {
     Serial.printf("saveGrayJpegWithBox: wrong format %d\n", fb->format);
     return false;
-  }
-
-  if (drawBox) {
-  drawRectGray(fb->buf, fb->width, fb->height, x, y, w, h, 255);
   }
 
   uint8_t *jpg_buf = nullptr;
@@ -287,14 +263,19 @@ static bool getBestRhinoBox(const ei_impulse_result_t &result, ei_impulse_result
 
 #if EI_CLASSIFIER_OBJECT_DETECTION == 1
   bool found = false;
-  for (size_t i = 0; i < EI_CLASSIFIER_OBJECT_DETECTION_COUNT; i++) {
-    auto bb = result.bounding_boxes[i];
-    if (bb.label == nullptr || strcmp(bb.label, "not rhino") == 0) continue;
-    
-    // Ignore anything below your threshold (currently 0.7f)
-    if (bb.value < EI_CLASSIFIER_OBJECT_DETECTION_THRESHOLD) continue;
+  for (size_t i = 0; i < result.bounding_boxes_count; i++) {
+    ei_impulse_result_bounding_box_t bb = result.bounding_boxes[i];
+    if (bb.label == nullptr) continue;
 
-    // Relaxed match: Check if "rhino" or "Rhino" is anywhere in the label
+            ei_printf("  %s (%f) [ x: %u, y: %u, width: %u, height: %u ]\r\n",
+                bb.label,
+                bb.value,
+                bb.x,
+                bb.y,
+                bb.width,
+                bb.height);
+
+    // Relaxed match: Check if "rhino" is anywhere in the label
     if (strcmp(bb.label, "rhino") == 0) {
       if (!found || bb.value > best.value) {
         best = bb;
@@ -309,57 +290,84 @@ static bool getBestRhinoBox(const ei_impulse_result_t &result, ei_impulse_result
 #endif
 }
 
-//ADDED FUNCTION
 static bool ei_resize_from_fb(camera_fb_t *fb, uint32_t img_width, uint32_t img_height, uint8_t *out_buf) {
-    const uint32_t pixels = img_width * img_height;
-    const uint32_t bpp = EI_CLASSIFIER_RAW_SAMPLE_COUNT / pixels;   // 1 or 3
+    if (!fb) {
+        ei_printf("ERR: fb is null\n");
+        return false;
+    }
 
     if (fb->format != PIXFORMAT_GRAYSCALE) {
         ei_printf("ERR: expected GRAYSCALE fb, got %d\n", (int)fb->format);
         return false;
     }
 
-    uint8_t *p = fb->buf;
+    const uint32_t src_w = fb->width;
+    const uint32_t src_h = fb->height;
+
+    if (src_w == 0 || src_h == 0 || img_width == 0 || img_height == 0) {
+        ei_printf("ERR: invalid dimensions\n");
+        return false;
+    }
+
+    // FIT_SHORTEST:
+    // Scale so the shortest source axis fills the destination,
+    // then center-crop the overflow on the longer axis.
+    const float scale_x = (float)img_width / (float)src_w;
+    const float scale_y = (float)img_height / (float)src_h;
+    const float scale = (scale_x > scale_y) ? scale_x : scale_y;
+
+    const float scaled_w = src_w * scale;
+    const float scaled_h = src_h * scale;
+
+    const float crop_x_scaled = (scaled_w - img_width) * 0.5f;
+    const float crop_y_scaled = (scaled_h - img_height) * 0.5f;
 
     for (uint32_t y = 0; y < img_height; y++) {
-        uint32_t src_y = (uint32_t)((uint64_t)y * fb->height / img_height);
         for (uint32_t x = 0; x < img_width; x++) {
-            uint32_t src_x = (uint32_t)((uint64_t)x * fb->width / img_width);
-            uint8_t gray = p[src_y * fb->width + src_x];
+            // Destination pixel -> scaled-source space
+            float sx_scaled = x + crop_x_scaled;
+            float sy_scaled = y + crop_y_scaled;
 
-            if (bpp == 1) {
-                out_buf[y * img_width + x] = gray;
-            } else {
-                size_t dst = (y * img_width + x) * 3;
-                out_buf[dst + 0] = gray;
-                out_buf[dst + 1] = gray;
-                out_buf[dst + 2] = gray;
-            }
+            // Scaled-source space -> original source space
+            float sx = sx_scaled / scale;
+            float sy = sy_scaled / scale;
+
+            // Nearest neighbor
+            int src_x = (int)(sx + 0.5f);
+            int src_y = (int)(sy + 0.5f);
+
+            if (src_x < 0) src_x = 0;
+            if (src_y < 0) src_y = 0;
+            if (src_x >= (int)src_w) src_x = (int)src_w - 1;
+            if (src_y >= (int)src_h) src_y = (int)src_h - 1;
+
+            out_buf[y * img_width + x] = fb->buf[src_y * src_w + src_x];
         }
     }
+
     return true;
 }
 
 // =================== PIR semaphore + task ===================
-//SemaphoreHandle_t pir_sem = nullptr;
+SemaphoreHandle_t pir_sem = nullptr;
 TaskHandle_t inferTaskHandle = nullptr;
 
-// void IRAM_ATTR onPirISR() {
-//   BaseType_t hp = pdFALSE;
-//   if (pir_sem) xSemaphoreGiveFromISR(pir_sem, &hp);
-//   if (hp) portYIELD_FROM_ISR();
-// }
+void IRAM_ATTR onPirISR() {
+  BaseType_t hp = pdFALSE;
+  if (pir_sem) xSemaphoreGiveFromISR(pir_sem, &hp);
+  if (hp) portYIELD_FROM_ISR();
+}
 
 void inferenceTask(void *param) {
   (void)param;
   Serial.printf("inferenceTask running on core %d\n", xPortGetCoreID());
 
   while (true) {
-    //xSemaphoreTake(pir_sem, portMAX_DELAY);
+    xSemaphoreTake(pir_sem, portMAX_DELAY);
 
     // Debounce
-    // vTaskDelay(pdMS_TO_TICKS(50));
-    // if (digitalRead(GPIO_PIR) != HIGH) continue;
+    vTaskDelay(pdMS_TO_TICKS(50));
+    if (digitalRead(GPIO_PIR) != HIGH) continue;
 
     //ws2812SetColor(3);
 
@@ -411,70 +419,31 @@ void inferenceTask(void *param) {
     ei_impulse_result_bounding_box_t best;
     bool rhino = getBestRhinoBox(result, best);
 
-    if (rhino) {
-      Serial.printf("RHINO DETECTED ✅ label = %s : conf=%.3f box(x=%u y=%u w=%u h=%u)\n",
+    if (rhino && best.value >= 0.7) {
+      Serial.printf("Rhino DETECTED ✅ label = %s : conf=%.3f box(x=%u y=%u w=%u h=%u)\n",
                     best.label, best.value, best.x, best.y, best.width, best.height);
 
       //ws2812SetColor(2);
 
-      const int FB_W = 320;
-      const int FB_H = 240;
-      const int IN_W = EI_CLASSIFIER_INPUT_WIDTH;
-      const int IN_H = EI_CLASSIFIER_INPUT_HEIGHT;
 
-      float target_ratio = (float)IN_W / (float)IN_H;
-      float fb_ratio = (float)FB_W / (float)FB_H;
-
-      int crop_x = 0, crop_y = 0;
-      int crop_w = FB_W, crop_h = FB_H;
-
-      if (fb_ratio > target_ratio) {
-          crop_w = (int)(FB_H * target_ratio);
-          crop_x = (FB_W - crop_w) / 2;
-      } else if (fb_ratio < target_ratio) {
-          crop_h = (int)(FB_W / target_ratio);
-          crop_y = (FB_H - crop_h) / 2;
-      }
-
-      int sx = crop_x + (int)((float)best.x * crop_w / IN_W);
-      int sy = crop_y + (int)((float)best.y * crop_h / IN_H);
-      int sw = (int)((float)best.width * crop_w / IN_W);
-      int sh = (int)((float)best.height * crop_h / IN_H);
-
-      if (sx < 0) sx = 0;
-      if (sy < 0) sy = 0;
-      if (sx + sw > FB_W) sw = FB_W - sx;
-      if (sy + sh > FB_H) sh = FB_H - sy;
-
-      Serial.printf("Mapped bbox: x=%d y=%d w=%d h=%d\n", sx, sy, sw, sh);
-
-      if (!saveGrayJpegWithBox(fb, sx, sy, sw, sh, true)) {
+      if (!saveGrayJpegWithBox(fb)) {
           Serial.println("Save failed");
       }
 
-      // if (!saveGrayJpegWithBox(fb)) {
-      //     Serial.println("Save failed");
-      // }
-
       // Send LoRa
-      //queueSendRhinoDetected();
-    // }
-    // else {
-    //   Serial.println("No rhino.");
-    //   //ws2812SetColor(1);
-    //   //sendString("No Rhino");
-    //   // Optional: save non-detections too
-    //   saveGrayJpegWithBox(fb, 0,0,0,0,false);
-    // }
-
-    //digitalWrite(GPIO_IRLED, LOW);
-
-    // Cooldown
-    vTaskDelay(pdMS_TO_TICKS(2000));
+      queueSendRhinoDetected();
     }
     else {
-      Serial.println("No Rhino Found");
+      Serial.println("No rhino.");
+      //ws2812SetColor(1);
+      //sendString("No Rhino");
+      // Optional: save non-detections too
     }
+
+    digitalWrite(GPIO_IRLED, LOW);
+
+    // Cooldown
+    vTaskDelay(pdMS_TO_TICKS(5000));
 
     esp_camera_fb_return(fb);
   }
@@ -488,10 +457,10 @@ void setup() {
   Serial.printf("Free heap: %u\n", ESP.getFreeHeap());
   Serial.printf("Free PSRAM: %u\n", ESP.getFreePsram());
 
-  // pinMode(GPIO_PIR, INPUT);
-  // pinMode(GPIO_IRLED, OUTPUT);
-  // digitalWrite(GPIO_IRLED, LOW);
-  // pinMode(GPIO_LIGHTSENSOR, INPUT);
+  pinMode(GPIO_PIR, INPUT);
+  pinMode(GPIO_IRLED, OUTPUT);
+  digitalWrite(GPIO_IRLED, LOW);
+  pinMode(GPIO_LIGHTSENSOR, INPUT);
 
   //ws2812Init();
 
@@ -516,17 +485,17 @@ void setup() {
   run_classifier_init();
 
   // LoRa
-  // SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, PIN_NSS);
-  // os_init();
-  // LMIC_reset();
-  // LMIC_selectSubBand(1);
-  // LMIC_setAdrMode(0);
-  // LMIC_setClockError(MAX_CLOCK_ERROR * 1 / 100);
-  // LMIC_startJoining();
+  SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, PIN_NSS);
+  os_init();
+  LMIC_reset();
+  LMIC_selectSubBand(1);
+  LMIC_setAdrMode(0);
+  LMIC_setClockError(MAX_CLOCK_ERROR * 1 / 100);
+  LMIC_startJoining();
 
   //PIR semaphore + ISR
-  // pir_sem = xSemaphoreCreateBinary();
-  // attachInterrupt(digitalPinToInterrupt(GPIO_PIR), onPirISR, RISING);
+  pir_sem = xSemaphoreCreateBinary();
+  attachInterrupt(digitalPinToInterrupt(GPIO_PIR), onPirISR, RISING);
 
   // Inference task
   xTaskCreatePinnedToCore(inferenceTask, "inferenceTask", 32768, nullptr, 1, &inferTaskHandle, 1);
@@ -535,5 +504,5 @@ void setup() {
 }
 
 void loop() {
-  vTaskDelay(pdMS_TO_TICKS(1000));
+  vTaskDelay(pdMS_TO_TICKS(10000));
 }
