@@ -1,0 +1,13 @@
+Warning: Width correction constrained.  The width correction value must be in the range of [0.000001 mm; 0.199999 mm] for the current design rules.
+Plotted to '/Users/ethanquach/Desktop/tinyScrubCam_pir/tinyScrubCam_pir/tinyScrubCam_pir-F_Cu.gbr'.
+Plotted to '/Users/ethanquach/Desktop/tinyScrubCam_pir/tinyScrubCam_pir/tinyScrubCam_pir-B_Cu.gbr'.
+Plotted to '/Users/ethanquach/Desktop/tinyScrubCam_pir/tinyScrubCam_pir/tinyScrubCam_pir-F_Paste.gbr'.
+Plotted to '/Users/ethanquach/Desktop/tinyScrubCam_pir/tinyScrubCam_pir/tinyScrubCam_pir-B_Paste.gbr'.
+Plotted to '/Users/ethanquach/Desktop/tinyScrubCam_pir/tinyScrubCam_pir/tinyScrubCam_pir-F_Silkscreen.gbr'.
+Plotted to '/Users/ethanquach/Desktop/tinyScrubCam_pir/tinyScrubCam_pir/tinyScrubCam_pir-B_Silkscreen.gbr'.
+Plotted to '/Users/ethanquach/Desktop/tinyScrubCam_pir/tinyScrubCam_pir/tinyScrubCam_pir-F_Mask.gbr'.
+Plotted to '/Users/ethanquach/Desktop/tinyScrubCam_pir/tinyScrubCam_pir/tinyScrubCam_pir-B_Mask.gbr'.
+Plotted to '/Users/ethanquach/Desktop/tinyScrubCam_pir/tinyScrubCam_pir/tinyScrubCam_pir-Edge_Cuts.gbr'.
+Plotted to '/Users/ethanquach/Desktop/tinyScrubCam_pir/tinyScrubCam_pir/tinyScrubCam_pir-F_Courtyard.gbr'.
+Created Gerber job file '/Users/ethanquach/Desktop/tinyScrubCam_pir/tinyScrubCam_pir/tinyScrubCam_pir-job.gbrjob'.
+Info: Done.
