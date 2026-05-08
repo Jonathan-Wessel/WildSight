@@ -2,7 +2,6 @@
 #include "esp_camera.h"
 #define CAMERA_MODEL_ESP32S3_EYE
 #include "camera_pins.h"
-//#include "ws2812.h"
 #include "sd_read_write.h"
 #include "img_converters.h"   // fmt2jpg()
 
@@ -14,12 +13,11 @@
 #include <string.h>
 
 // =================== Edge Impulse ===================
-#define EI_CLASSIFIER_OBJECT_DETECTION_THRESHOLD 0.01f
 #include <Wildsights_rhino_md_conf.5_inferencing.h>
 #include "edge-impulse-sdk/dsp/image/image.hpp"
 #include "esp_heap_caps.h"
 
-// =================== FreeRTOS ===================
+// =================== FreeRTOS ===================draw
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -121,31 +119,6 @@ void onEvent(ev_t ev) {
   }
 }
 
-// =================== Bounding box draw (GRAYSCALE) ===================
-static inline void putPixelGray(uint8_t* img, int w, int h, int x, int y, uint8_t v) {
-  if (x < 0 || y < 0 || x >= w || y >= h) return;
-  img[y * w + x] = v;
-}
-
-static void drawRectGray(uint8_t* img, int w, int h, int x, int y, int rw, int rh, uint8_t v) {
-  if (rw <= 0 || rh <= 0) return;
-
-  if (x < 0) { rw += x; x = 0; }
-  if (y < 0) { rh += y; y = 0; }
-  if (x + rw > w) rw = w - x;
-  if (y + rh > h) rh = h - y;
-  if (rw <= 0 || rh <= 0) return;
-
-  for (int i = x; i < x + rw; i++) {
-    putPixelGray(img, w, h, i, y, v);
-    putPixelGray(img, w, h, i, y + rh - 1, v);
-  }
-  for (int j = y; j < y + rh; j++) {
-    putPixelGray(img, w, h, x, j, v);
-    putPixelGray(img, w, h, x + rw - 1, j, v);
-  }
-}
-
 // =================== Camera config (GRAYSCALE QVGA) ===================
 static bool cam_init_ok = false;
 
@@ -168,7 +141,7 @@ static camera_config_t cam_cfg = {
   .pin_href = HREF_GPIO_NUM,
   .pin_pclk = PCLK_GPIO_NUM,
 
-  .xclk_freq_hz = 20000000,
+  .xclk_freq_hz = 5000000,
   .ledc_timer = LEDC_TIMER_0,
   .ledc_channel = LEDC_CHANNEL_0,
 
@@ -183,6 +156,7 @@ static camera_config_t cam_cfg = {
 static uint8_t *snapshot_buf = nullptr;
 static size_t snapshot_buf_size = 0;
 
+//Camera Initialization Function
 bool cameraInitGray() {
   if (cam_init_ok) return true;
 
@@ -193,11 +167,13 @@ bool cameraInitGray() {
   }
 
   sensor_t *s = esp_camera_sensor_get();
-  if (s) {
-    s->set_vflip(s, 1);
-    s->set_brightness(s, 1);
-    s->set_saturation(s, 0);
-  }
+  Serial.printf("Camera PID: 0x%02x\n", s->id.PID);
+
+      if (s->id.PID == OV3660_PID) {
+      s->set_vflip(s, 1); // flip it back
+      s->set_brightness(s, 1); // up the brightness just a bit
+      s->set_saturation(s, 0); // lower the saturation
+    }
 
   cam_init_ok = true;
   return true;
@@ -205,90 +181,36 @@ bool cameraInitGray() {
 
 // EI data feed
 static int ei_camera_get_data(size_t offset, size_t length, float *out_ptr) {
-  if (!snapshot_buf) return -1;
-  if (offset + length > snapshot_buf_size) {
-    Serial.printf("EI get_data OOB: off=%u len=%u size=%u\n",
-                  (unsigned)offset, (unsigned)length, (unsigned)snapshot_buf_size);
-    return -1;
-  }
+    size_t pixel_ix = offset;
+    size_t pixels_left = length;
 
-  for (size_t i = 0; i < length; i++) {
-#if (EI_CLASSIFIER_TFLITE_INPUT_DATATYPE == EI_CLASSIFIER_DATATYPE_INT8)
-    out_ptr[i] = (float)((int)snapshot_buf[offset + i] - 128);
-#elif (EI_CLASSIFIER_TFLITE_INPUT_DATATYPE == EI_CLASSIFIER_DATATYPE_UINT8)
-    out_ptr[i] = (float)snapshot_buf[offset + i];
-#else
-    out_ptr[i] = (float)snapshot_buf[offset + i] / 255.0f;
-#endif
-  }
-  return 0;
-}
-
-
-bool captureForEI(uint32_t out_w, uint32_t out_h, uint8_t *out_buf) {
-  camera_fb_t *fb = esp_camera_fb_get();
-  if (!fb) {
-    Serial.println("Camera capture failed");
-    return false;
-  }
-
-  if (fb->format != PIXFORMAT_GRAYSCALE) {
-    Serial.printf("Unexpected fb format=%d\n", (int)fb->format);
-    esp_camera_fb_return(fb);
-    return false;
-  }
-
-  // Calculate center crop dimensions to preserve the AI model's aspect ratio
-  float target_ratio = (float)out_w / (float)out_h;
-  float src_ratio = (float)fb->width / (float)fb->height;
-
-  int crop_w = fb->width;
-  int crop_h = fb->height;
-  int offset_x = 0;
-  int offset_y = 0;
-
-  if (src_ratio > target_ratio) {
-    // Source is wider than needed (e.g., 320x240 source, 96x96 target)
-    // We crop the left and right sides.
-    crop_w = (int)(fb->height * target_ratio);
-    offset_x = (fb->width - crop_w) / 2;
-  } else if (src_ratio < target_ratio) {
-    // Source is taller than needed. We crop the top and bottom.
-    crop_h = (int)(fb->width / target_ratio);
-    offset_y = (fb->height - crop_h) / 2;
-  }
-
-  // Downsample ONLY the cropped region into the Edge Impulse buffer
-  for (uint32_t y = 0; y < out_h; y++) {
-    uint32_t src_y = offset_y + (y * crop_h) / out_h;
-    for (uint32_t x = 0; x < out_w; x++) {
-      uint32_t src_x = offset_x + (x * crop_w) / out_w;
-      
-      // Grab the grayscale pixel and place it in the EI buffer
-      out_buf[y * out_w + x] = fb->buf[src_y * fb->width + src_x];
+    while (pixels_left != 0) {
+        out_ptr[0] = (float)snapshot_buf[pixel_ix];
+        out_ptr++;
+        pixel_ix++;
+        pixels_left--;
     }
-  }
 
-  esp_camera_fb_return(fb);
-  return true;
+    return 0;
 }
 
 // Save latest GRAYSCALE frame as JPEG, optionally drawing a bbox first
-bool saveGrayJpegWithBox(int x, int y, int w, int h, bool drawBox) {
-  camera_fb_t *fb = esp_camera_fb_get();
-  if (!fb) return false;
-
-  if (fb->format != PIXFORMAT_GRAYSCALE) {
-    esp_camera_fb_return(fb);
+bool saveGrayJpegWithBox(camera_fb_t *fb) {
+  if (!fb) {
+    Serial.println("saveGrayJpegWithBox: fb is null");
     return false;
   }
 
-  if (drawBox) {
-    drawRectGray(fb->buf, fb->width, fb->height, x, y, w, h, 255);
+  if (fb->format != PIXFORMAT_GRAYSCALE) {
+    Serial.printf("saveGrayJpegWithBox: wrong format %d\n", fb->format);
+    return false;
   }
 
   uint8_t *jpg_buf = nullptr;
   size_t jpg_len = 0;
+
+  Serial.printf("Encoding JPEG from grayscale: w=%u h=%u len=%u\n",
+                fb->width, fb->height, fb->len);
 
   bool ok = fmt2jpg(
     fb->buf, fb->len,
@@ -298,26 +220,38 @@ bool saveGrayJpegWithBox(int x, int y, int w, int h, bool drawBox) {
     &jpg_buf, &jpg_len
   );
 
-  esp_camera_fb_return(fb);
+  Serial.printf("fmt2jpg ok=%d jpg_buf=%p jpg_len=%u freeHeap=%u\n",
+                ok ? 1 : 0,
+                jpg_buf,
+                (unsigned)jpg_len,
+                (unsigned)ESP.getFreeHeap());
 
   if (!ok || !jpg_buf || jpg_len < 2) {
+    Serial.println("JPEG encode failed");
     if (jpg_buf) free(jpg_buf);
     return false;
   }
 
   int idx = readFileNum(SD_MMC, "/camera");
   if (idx < 0) {
+    Serial.println("readFileNum failed");
     free(jpg_buf);
     return false;
   }
 
   String path = "/camera/" + String(idx) + ".jpg";
-  writejpg(SD_MMC, path.c_str(), jpg_buf, jpg_len);
-  Serial.print("Saved: ");
-  Serial.println(path);
+
+  bool write_ok = writejpg(SD_MMC, path.c_str(), jpg_buf, jpg_len);
+  if (write_ok) {
+    Serial.print("Saved: ");
+    Serial.println(path);
+  } else {
+    Serial.print("Failed to save: ");
+    Serial.println(path);
+  }
 
   free(jpg_buf);
-  return true;
+  return write_ok;
 }
 
 static bool getBestRhinoBox(const ei_impulse_result_t &result, ei_impulse_result_bounding_box_t &best) {
@@ -325,15 +259,20 @@ static bool getBestRhinoBox(const ei_impulse_result_t &result, ei_impulse_result
 
 #if EI_CLASSIFIER_OBJECT_DETECTION == 1
   bool found = false;
-  for (size_t i = 0; i < EI_CLASSIFIER_OBJECT_DETECTION_COUNT; i++) {
-    auto bb = result.bounding_boxes[i];
-    if (!bb.label) continue;
-    
-    // Ignore anything below your threshold (currently 0.01f)
-    if (bb.value < EI_CLASSIFIER_OBJECT_DETECTION_THRESHOLD) continue;
+  for (size_t i = 0; i < result.bounding_boxes_count; i++) {
+    ei_impulse_result_bounding_box_t bb = result.bounding_boxes[i];
+    if (bb.label == nullptr) continue;
 
-    // Relaxed match: Check if "rhino" or "Rhino" is anywhere in the label
-    if (strstr(bb.label, "rhino") != nullptr || strstr(bb.label, "Rhino") != nullptr) {
+            ei_printf("  %s (%f) [ x: %u, y: %u, width: %u, height: %u ]\r\n",
+                bb.label,
+                bb.value,
+                bb.x,
+                bb.y,
+                bb.width,
+                bb.height);
+
+    // Relaxed match: Check if "rhino" is anywhere in the label
+    if (strcmp(bb.label, "rhino") == 0) {
       if (!found || bb.value > best.value) {
         best = bb;
         found = true;
@@ -345,6 +284,64 @@ static bool getBestRhinoBox(const ei_impulse_result_t &result, ei_impulse_result
   (void)result;
   return false;
 #endif
+}
+
+static bool ei_resize_from_fb(camera_fb_t *fb, uint32_t img_width, uint32_t img_height, uint8_t *out_buf) {
+    if (!fb) {
+        ei_printf("ERR: fb is null\n");
+        return false;
+    }
+
+    if (fb->format != PIXFORMAT_GRAYSCALE) {
+        ei_printf("ERR: expected GRAYSCALE fb, got %d\n", (int)fb->format);
+        return false;
+    }
+
+    const uint32_t src_w = fb->width;
+    const uint32_t src_h = fb->height;
+
+    if (src_w == 0 || src_h == 0 || img_width == 0 || img_height == 0) {
+        ei_printf("ERR: invalid dimensions\n");
+        return false;
+    }
+
+    // FIT_SHORTEST:
+    // Scale so the shortest source axis fills the destination,
+    // then center-crop the overflow on the longer axis.
+    const float scale_x = (float)img_width / (float)src_w;
+    const float scale_y = (float)img_height / (float)src_h;
+    const float scale = (scale_x > scale_y) ? scale_x : scale_y;
+
+    const float scaled_w = src_w * scale;
+    const float scaled_h = src_h * scale;
+
+    const float crop_x_scaled = (scaled_w - img_width) * 0.5f;
+    const float crop_y_scaled = (scaled_h - img_height) * 0.5f;
+
+    for (uint32_t y = 0; y < img_height; y++) {
+        for (uint32_t x = 0; x < img_width; x++) {
+            // Destination pixel -> scaled-source space
+            float sx_scaled = x + crop_x_scaled;
+            float sy_scaled = y + crop_y_scaled;
+
+            // Scaled-source space -> original source space
+            float sx = sx_scaled / scale;
+            float sy = sy_scaled / scale;
+
+            // Nearest neighbor
+            int src_x = (int)(sx + 0.5f);
+            int src_y = (int)(sy + 0.5f);
+
+            if (src_x < 0) src_x = 0;
+            if (src_y < 0) src_y = 0;
+            if (src_x >= (int)src_w) src_x = (int)src_w - 1;
+            if (src_y >= (int)src_h) src_y = (int)src_h - 1;
+
+            out_buf[y * img_width + x] = fb->buf[src_y * src_w + src_x];
+        }
+    }
+
+    return true;
 }
 
 // =================== PIR semaphore + task ===================
@@ -368,24 +365,47 @@ void inferenceTask(void *param) {
     vTaskDelay(pdMS_TO_TICKS(50));
     if (digitalRead(GPIO_PIR) != HIGH) continue;
 
-    //ws2812SetColor(3);
 
-    // ---- EI capture + classify ----
-    Serial.println("INFERENCE: starting capture");
-    if (!captureForEI(EI_CLASSIFIER_INPUT_WIDTH, EI_CLASSIFIER_INPUT_HEIGHT, snapshot_buf)) {
-      Serial.println("INFERENCE: capture failed");
-      //ws2812SetColor(1);
-      continue;
+    for (int i = 0; i < 2; i++) {
+      camera_fb_t *tmp = esp_camera_fb_get();
+      if (tmp) esp_camera_fb_return(tmp);
+      vTaskDelay(pdMS_TO_TICKS(10));
     }
+
+    // instead of wait_ms, we'll wait on the signal, this allows threads to cancel us...
+        if (ei_sleep(5) != EI_IMPULSE_OK) {
+            return;
+        }
 
     ei::signal_t signal;
     signal.total_length = EI_CLASSIFIER_RAW_SAMPLE_COUNT;
     signal.get_data = &ei_camera_get_data;
 
-    Serial.println("INFERENCE: running classifier");
+    digitalWrite(GPIO_IRLED, HIGH);
+    delay(500);
+    camera_fb_t *fb = esp_camera_fb_get();
+    
+      if (!fb) {
+          Serial.printf("Camera capture failed\r\n");
+          digitalWrite(GPIO_IRLED, LOW);
+          continue;
+      }
+
+      Serial.printf("fb format=%d w=%d h=%d len=%u\r\n",
+              (int)fb->format, fb->width, fb->height, (unsigned)fb->len);
+
+      Serial.printf("capturing...\n");
+      if (!ei_resize_from_fb(fb, EI_CLASSIFIER_INPUT_WIDTH, EI_CLASSIFIER_INPUT_HEIGHT, snapshot_buf)) {
+          Serial.printf("Failed to resize image\r\n");
+          esp_camera_fb_return(fb);
+          continue;
+      }
+      Serial.printf("done capturing\n");
+
+    Serial.printf("INFERENCE: running classifier\n");
     ei_impulse_result_t result = {0};
     EI_IMPULSE_ERROR err = run_classifier(&signal, &result, false);
-    Serial.println("INFERENCE: done classifier");
+    Serial.printf("INFERENCE: done classifier\n");
    
     if (err != EI_IMPULSE_OK) {
       Serial.printf("run_classifier failed (%d)\n", err);
@@ -397,54 +417,15 @@ void inferenceTask(void *param) {
     ei_impulse_result_bounding_box_t best;
     bool rhino = getBestRhinoBox(result, best);
 
-    if (rhino) {
-      Serial.printf("RHINO DETECTED ✅ conf=%.3f box(x=%u y=%u w=%u h=%u)\n",
-                    best.value, best.x, best.y, best.width, best.height);
+    if (rhino && best.value >= 0.7) {
+      Serial.printf("Rhino DETECTED ✅ label = %s : conf=%.3f box(x=%u y=%u w=%u h=%u)\n",
+                    best.label, best.value, best.x, best.y, best.width, best.height);
+
       //ws2812SetColor(2);
 
-      // Scale bbox from model input -> 320x240 framebuffer
-      /*
-      const int FB_W = 320;
-      const int FB_H = 240;
-      const int IN_W = EI_CLASSIFIER_INPUT_WIDTH;
-      const int IN_H = EI_CLASSIFIER_INPUT_HEIGHT;
 
-      int sx = (best.x * FB_W) / IN_W;
-      int sy = (best.y * FB_H) / IN_H;
-      int sw = (best.width  * FB_W) / IN_W;
-      int sh = (best.height * FB_H) / IN_H;
-      */
-      // Scale bbox from model input -> cropped region -> 320x240 framebuffer
-      const int FB_W = 320;
-      const int FB_H = 240;
-      const int IN_W = EI_CLASSIFIER_INPUT_WIDTH;
-      const int IN_H = EI_CLASSIFIER_INPUT_HEIGHT;
-
-      // 1. Re-calculate the crop dimensions used during capture
-      float target_ratio = (float)IN_W / (float)IN_H;
-      float src_ratio = (float)FB_W / (float)FB_H;
-
-      int crop_w = FB_W;
-      int crop_h = FB_H;
-      int offset_x = 0;
-      int offset_y = 0;
-
-      if (src_ratio > target_ratio) {
-        crop_w = (int)(FB_H * target_ratio);
-        offset_x = (FB_W - crop_w) / 2;
-      } else if (src_ratio < target_ratio) {
-        crop_h = (int)(FB_W / target_ratio);
-        offset_y = (FB_H - crop_h) / 2;
-      }
-
-      // 2. Map the AI's bounding box back onto the uncropped 320x240 photo
-      int sx = offset_x + (best.x * crop_w) / IN_W;
-      int sy = offset_y + (best.y * crop_h) / IN_H;
-      int sw = (best.width * crop_w) / IN_W;
-      int sh = (best.height * crop_h) / IN_H;
-      // Save JPEG with bbox overlay
-      if (!saveGrayJpegWithBox(sx, sy, sw, sh, true)) {
-        Serial.println("Save failed");
+      if (!saveGrayJpegWithBox(fb)) {
+          Serial.println("Save failed");
       }
 
       // Send LoRa
@@ -453,13 +434,19 @@ void inferenceTask(void *param) {
     else {
       Serial.println("No rhino.");
       //ws2812SetColor(1);
+      if (!saveGrayJpegWithBox(fb)) {
+          Serial.println("Save failed");
+      }
       sendString("No Rhino");
       // Optional: save non-detections too
-      saveGrayJpegWithBox(0,0,0,0,false);
     }
+
+    digitalWrite(GPIO_IRLED, LOW);
 
     // Cooldown
     vTaskDelay(pdMS_TO_TICKS(5000));
+
+    esp_camera_fb_return(fb);
   }
 }
 
@@ -473,6 +460,7 @@ void setup() {
 
   pinMode(GPIO_PIR, INPUT);
   pinMode(GPIO_IRLED, OUTPUT);
+  digitalWrite(GPIO_IRLED, LOW);
   pinMode(GPIO_LIGHTSENSOR, INPUT);
 
   //ws2812Init();
@@ -506,7 +494,7 @@ void setup() {
   LMIC_setClockError(MAX_CLOCK_ERROR * 1 / 100);
   LMIC_startJoining();
 
-  // PIR semaphore + ISR
+  //PIR semaphore + ISR
   pir_sem = xSemaphoreCreateBinary();
   attachInterrupt(digitalPinToInterrupt(GPIO_PIR), onPirISR, RISING);
 
